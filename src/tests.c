@@ -293,6 +293,30 @@ void scalar_test(void) {
     }
 
     {
+        // Test that montgomery conversion in both directions works.
+        secp256k1_scalar_t t;
+        secp256k1_scalar_to_mont(&t, &s1);
+        secp256k1_scalar_from_mont(&t, &t);
+        CHECK(secp256k1_scalar_eq(&t, &s1));
+        secp256k1_scalar_from_mont(&t, &s2);
+        secp256k1_scalar_to_mont(&t, &t);
+        CHECK(secp256k1_scalar_eq(&t, &s2));
+    }
+
+    {
+        // Test that montgomery multiplication works.
+        secp256k1_scalar_t m1, m2;
+        secp256k1_scalar_to_mont(&m1, &s1);
+        secp256k1_scalar_to_mont(&m2, &s2);
+        secp256k1_scalar_t r;
+        secp256k1_scalar_mul_mont(&r, &m1, &m2);
+        secp256k1_scalar_from_mont(&r, &r);
+        secp256k1_scalar_t r2;
+        secp256k1_scalar_mul(&r2, &s1, &s2);
+        CHECK(secp256k1_scalar_eq(&r, &r2));
+    }
+
+    {
         // Test that adding the scalars together is equal to adding their numbers together modulo the order.
         secp256k1_num_t rnum;
         secp256k1_num_init(&rnum);
