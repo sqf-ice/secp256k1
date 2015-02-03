@@ -22,7 +22,7 @@ typedef struct {
     secp256k1_ge_t ge_x, ge_y;
     secp256k1_gej_t gej_x, gej_y;
     unsigned char data[32];
-    int wnaf[256];
+    int16_t wnaf[256];
 } bench_inv_t;
 
 void bench_setup(void* arg) {
@@ -193,7 +193,7 @@ void bench_group_double_var(void* arg) {
     bench_inv_t *data = (bench_inv_t*)arg;
 
     for (i = 0; i < 200000; i++) {
-        secp256k1_gej_double_var(&data->gej_x, &data->gej_x);
+        secp256k1_gej_double_var(&data->gej_x, &data->gej_x, NULL);
     }
 }
 
@@ -202,7 +202,7 @@ void bench_group_add_var(void* arg) {
     bench_inv_t *data = (bench_inv_t*)arg;
 
     for (i = 0; i < 200000; i++) {
-        secp256k1_gej_add_var(&data->gej_x, &data->gej_x, &data->gej_y);
+        secp256k1_gej_add_var(&data->gej_x, &data->gej_x, &data->gej_y, NULL);
     }
 }
 

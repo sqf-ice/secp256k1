@@ -256,6 +256,10 @@ SECP256K1_WARN_UNUSED_RESULT int secp256k1_ec_pubkey_tweak_mul(
   const unsigned char *tweak
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(3);
 
+int secp256k1_schnorr_sign(const unsigned char *msg32, unsigned char *sig64, const unsigned char *seckey, secp256k1_nonce_function_t noncefp, const void* noncedata);
+int secp256k1_schnorr_verify(const unsigned char *msg32, const unsigned char *sig64, const unsigned char *pubkey, int pubkeylen);
+int secp256k1_schnorr_verify_batch(int n, const unsigned char *msg32, const unsigned char **sig64, const unsigned char **pubkey, const int *pubkeylen);
+
 # ifdef __cplusplus
 }
 # endif

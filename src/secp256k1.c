@@ -16,6 +16,7 @@
 #include "ecmult_impl.h"
 #include "ecmult_gen_impl.h"
 #include "ecdsa_impl.h"
+#include "schnorr_impl.h"
 #include "eckey_impl.h"
 #include "hash_impl.h"
 
@@ -351,3 +352,81 @@ int secp256k1_ec_privkey_import(unsigned char *seckey, const unsigned char *priv
     secp256k1_scalar_clear(&key);
     return ret;
 }
+
+void secp256k1_schnorr_msghash_sha256(unsigned char *h32, const unsigned char *r32, const unsigned char *msg32) {
+    secp256k1_sha256_t sha;
+    secp256k1_sha256_initialize(&sha);
+    secp256k1_sha256_write(&sha, r32, 32);
+    secp256k1_sha256_write(&sha, msg32, 32);
+    secp256k1_sha256_finalize(&sha, h32);
+}
+
+int secp256k1_schnorr_sign(const unsigned char *msg32, unsigned char *sig64, const unsigned char *seckey, secp256k1_nonce_function_t noncefp, const void* noncedata) {
+    secp256k1_scalar_t sec, non;
+    int ret = 0;
+    int overflow = 0;
+    unsigned int count = 0;
+    DEBUG_CHECK(secp256k1_ecmult_gen_consts != NULL);
+    DEBUG_CHECK(msg32 != NULL);
+    DEBUG_CHECK(sig64 != NULL);
+    DEBUG_CHECK(seckey != NULL);
+    if (noncefp == NULL) {
+        noncefp = secp256k1_nonce_function_default;
+    }
+
+    secp256k1_scalar_set_b32(&sec, seckey, NULL);
+    while (1) {
+        unsigned char nonce32[32];
+        ret = noncefp(nonce32, msg32, seckey, count, noncedata);
+        if (!ret) {
+            break;
+        }
+        secp256k1_scalar_set_b32(&non, nonce32, &overflow);
+        memset(nonce32, 0, 32);
+        if (!secp256k1_scalar_is_zero(&non) && !overflow) {
+            if (secp256k1_schnorr_sig_sign(sig64, &sec, &non, secp256k1_schnorr_msghash_sha256, msg32)) {
+                break;
+            }
+        }
+        count++;
+    }
+    secp256k1_scalar_clear(&non);
+    secp256k1_scalar_clear(&sec);
+    return ret;
+}
+
+int secp256k1_schnorr_verify(const unsigned char *msg32, const unsigned char *sig64, const unsigned char *pubkey, int pubkeylen) {
+    secp256k1_ge_t q;
+    DEBUG_CHECK(secp256k1_ecmult_consts != NULL);
+    DEBUG_CHECK(msg32 != NULL);
+    DEBUG_CHECK(sig64 != NULL);
+    DEBUG_CHECK(pubkey != NULL);
+
+    if (!secp256k1_eckey_pubkey_parse(&q, pubkey, pubkeylen)) {
+        return 0;
+    }
+    return secp256k1_schnorr_sig_verify(sig64, &q, secp256k1_schnorr_msghash_sha256, msg32);
+}
+
+int secp256k1_schnorr_verify_batch(int n, const unsigned char *msg32, const unsigned char **sig64, const unsigned char **pubkey, const int *pubkeylen) {
+    secp256k1_ge_t q[MAX_MULTI];
+    unsigned char sig[MAX_MULTI][64];
+    int k;
+
+    DEBUG_CHECK(secp256k1_ecmult_consts != NULL);
+    DEBUG_CHECK(msg32 != NULL);
+    DEBUG_CHECK(sig64 != NULL);
+    DEBUG_CHECK(pubkey != NULL);
+    DEBUG_CHECK(pubkeylen != NULL);
+    DEBUG_CHECK(n < MAX_MULTI);
+
+    for (k = 0; k < n; k++) {
+        memcpy(&sig[k], sig64[k], 64);
+        if (!secp256k1_eckey_pubkey_parse(&q[k], pubkey[k], pubkeylen[k])) {
+            return 0;
+        }
+    }
+
+    return secp256k1_schnorr_sig_verify_batch(n, sig, q, secp256k1_schnorr_msghash_sha256, msg32);
+}
+

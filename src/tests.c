@@ -1014,11 +1014,11 @@ void test_ge(void) {
                 ge_equals_gej(&ref, &resj);
 #ifdef USE_COZ
                 /* Co-Z doubling. */
-                secp256k1_coz_dblu_var(&r, &ra, &gej[i1]);
+                secp256k1_coz_dblu_var(&r, &ra, &gej[i1], &zr2);
                 resj.x = r.x; resj.y = r.y; resj.z = ra.z; resj.infinity = ra.infinity;
                 ge_equals_gej(&ref, &resj);
                 ge_equals_gej(&ge[i1], &ra);
-                secp256k1_coz_dblu_var(&r, &ra, &gej[i2]);
+                secp256k1_coz_dblu_var(&r, &ra, &gej[i2], &zr2);
                 resj.x = r.x; resj.y = r.y; resj.z = ra.z; resj.infinity = ra.infinity;
                 ge_equals_gej(&ref, &resj);
                 ge_equals_gej(&ge[i2], &ra);
@@ -1075,12 +1075,10 @@ void test_ge(void) {
         for (i = 0; i < 4 * runs + 1; i++) {
             /* Compute gej[i + 1].z / gez[i].z (with gej[n].z taken to be 1). */
             if (i < 4 * runs) {
-                secp256k1_fe_mul(&zr[i], &zinv[i], &gej[i + 1].z);
-            } else {
-                zr[i] = zinv[i];
+                secp256k1_fe_mul(&zr[i + 1], &zinv[i], &gej[i + 1].z);
             }
         }
-        secp256k1_ge_set_table_gej(4 * runs + 1, ge_set_table, gej, zr);
+        secp256k1_ge_set_table_gej_var(4 * runs + 1, ge_set_table, gej, zr);
         secp256k1_ge_set_all_gej_var(4 * runs + 1, ge_set_all, gej);
         for (i = 0; i < 4 * runs + 1; i++) {
             ge_equals_gej(&ge_set_table[i], &gej[i]);
@@ -1197,6 +1195,47 @@ void test_point_times_order(const secp256k1_gej_t *point) {
     CHECK(secp256k1_eckey_pubkey_serialize(&res3, pub, &psize, 1) == 0);
 }
 
+void test_ecmult_multi_ecmult(void) {
+    secp256k1_scalar_t x[3];
+    secp256k1_scalar_t t[3], tall;
+    secp256k1_gej_t a[3];
+    secp256k1_gej_t tmp, res1, res2;
+    random_scalar_order_test(&x[0]);
+    random_scalar_order_test(&x[1]);
+    random_scalar_order_test(&x[2]);
+    random_scalar_order_test(&t[0]);
+    random_scalar_order_test(&t[1]);
+    random_scalar_order_test(&t[2]);
+    secp256k1_ecmult_gen(&a[1], &t[0]);
+    secp256k1_ecmult_gen(&a[2], &t[1]);
+    secp256k1_ecmult_gen(&a[0], &t[2]);
+
+    /* Compute res1 = (x1*a1 + t1*g) + (x2*a2 + t2) + (x3*a3 + t3). */
+    secp256k1_ecmult(&res1, &a[0], &x[0], &t[0]);
+    secp256k1_ecmult(&tmp, &a[1], &x[1], &t[1]);
+    secp256k1_gej_add_var(&res1, &res1, &tmp, NULL);
+    secp256k1_ecmult(&tmp, &a[2], &x[2], &t[2]);
+    secp256k1_gej_add_var(&res1, &res1, &tmp, NULL);
+
+    /* Compute res2 = x1*a1 + x2*a2 + x3*a3 + (t1+t2+t3)*g. */
+    secp256k1_scalar_add(&tall, &t[0], &t[1]);
+    secp256k1_scalar_add(&tall, &tall, &t[2]);
+    secp256k1_ecmult_mult(3, &res2, a, x, &tall);
+
+    /* Compare res1 == res2. */
+    secp256k1_gej_neg(&res2, &res2);
+    secp256k1_gej_add_var(&res2, &res2, &res1, NULL);
+    CHECK(secp256k1_gej_is_infinity(&res2));
+}
+
+void run_ecmult_multi_ecmult(void) {
+    int i;
+    for (i = 0; i < 8 * count; i++) {
+        test_ecmult_multi_ecmult();
+    }
+}
+
+
 void run_point_times_order(void) {
     int i;
     char c[64];
@@ -1218,7 +1257,7 @@ void run_point_times_order(void) {
 
 void test_wnaf(const secp256k1_scalar_t *number, int w) {
     secp256k1_scalar_t x, two, t;
-    int wnaf[256];
+    int16_t wnaf[256];
     int zeroes = -1;
     int i;
     int bits;
@@ -1783,6 +1822,67 @@ void run_ecdsa_edge_cases(void) {
     test_ecdsa_edge_cases();
 }
 
+/** Horribly broken hash function. Do not use for anything but tests. */
+void test_schnorr_hash(unsigned char *h32, const unsigned char *r32, const unsigned char *msg32) {
+    int i;
+    for (i = 0; i < 32; i++) {
+        h32[i] = r32[i] ^ msg32[i];
+    }
+}
+
+void test_schnorr_sign_verify(void) {
+    unsigned char msg32[32];
+    unsigned char sig64[3][64];
+    secp256k1_gej_t pubkeyj[3];
+    secp256k1_ge_t pubkey[3];
+    secp256k1_scalar_t nonce[3], key[3];
+    int i = 0;
+    int k;
+
+    secp256k1_rand256_test(msg32);
+
+    for (k = 0; k < 3; k++) {
+        random_scalar_order_test(&key[k]);
+
+        do {
+            random_scalar_order_test(&nonce[k]);
+            if (secp256k1_schnorr_sig_sign(sig64[k], &key[k], &nonce[k], &test_schnorr_hash, msg32)) {
+                break;
+            }
+        } while(1);
+
+        secp256k1_ecmult_gen(&pubkeyj[k], &key[k]);
+        secp256k1_ge_set_gej_var(&pubkey[k], &pubkeyj[k]);
+        CHECK(secp256k1_schnorr_sig_verify(sig64[k], &pubkey[k], &test_schnorr_hash, msg32));
+
+        for (i = 0; i < 4; i++) {
+            int pos = secp256k1_rand32() % 64;
+            int mod = 1 + (secp256k1_rand32() % 255);
+            sig64[k][pos] ^= mod;
+            CHECK(secp256k1_schnorr_sig_verify(sig64[k], &pubkey[k], &test_schnorr_hash, msg32) == 0);
+            sig64[k][pos] ^= mod;
+        }
+    }
+
+    CHECK(secp256k1_schnorr_sig_verify_batch(3, sig64, pubkey, test_schnorr_hash, msg32));
+
+    for (i = 0; i < 4; i++) {
+        int pos = secp256k1_rand32() % 64;
+        int mod = 1 + (secp256k1_rand32() % 255);
+        k = secp256k1_rand32() % 3;
+        sig64[k][pos] ^= mod;
+        CHECK(secp256k1_schnorr_sig_verify_batch(3, sig64, pubkey, &test_schnorr_hash, msg32) == 0);
+        sig64[k][pos] ^= mod;
+    }
+}
+
+void run_schnorr_sign_verify(void) {
+    int i;
+    for (i = 0; i < 32 * count; i++) {
+         test_schnorr_sign_verify();
+    }
+}
+
 #ifdef ENABLE_OPENSSL_TESTS
 EC_KEY *get_openssl_key(const secp256k1_scalar_t *key) {
     unsigned char privkey[300];
@@ -1893,6 +1993,7 @@ int main(int argc, char **argv) {
     run_wnaf();
     run_point_times_order();
     run_ecmult_chain();
+    run_ecmult_multi_ecmult();
 
     /* ecdsa tests */
     run_random_pubkeys();
@@ -1902,6 +2003,9 @@ int main(int argc, char **argv) {
 #ifdef ENABLE_OPENSSL_TESTS
     run_ecdsa_openssl();
 #endif
+
+    /* Schnorr tests */
+    run_schnorr_sign_verify();
 
     printf("random run = %llu\n", (unsigned long long)secp256k1_rand32() + ((unsigned long long)secp256k1_rand32() << 32));
 
