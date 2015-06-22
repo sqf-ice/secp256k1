@@ -1357,6 +1357,47 @@ void test_point_times_order(const secp256k1_gej_t *point) {
     CHECK(secp256k1_eckey_pubkey_serialize(&res3, pub, &psize, 1) == 0);
 }
 
+void test_ecmult_points_ecmult(void) {
+    secp256k1_scalar_t x[SECP256K1_SCHNORR_MAX_BATCH];
+    secp256k1_scalar_t t[SECP256K1_SCHNORR_MAX_BATCH], tall;
+    secp256k1_gej_t a[SECP256K1_SCHNORR_MAX_BATCH];
+    secp256k1_gej_t tmp, res1, res2;
+    int n, i;
+    n = 1 + (secp256k1_rand32() % (SECP256K1_SCHNORR_MAX_BATCH - 1));
+    for (i = 0; i < n; i++) {
+        random_scalar_order_test(&x[i]);
+        random_scalar_order_test(&t[i]);
+        secp256k1_ecmult_gen(&ctx->ecmult_gen_ctx, &a[(i + 1) % n], &t[i]);
+    }
+
+    /* Compute res1 = (x1*a1 + t1*g) + (x2*a2 + t2) + (x3*a3 + t3). */
+    secp256k1_ecmult(&ctx->ecmult_ctx, &res1, &a[0], &x[0], &t[0]);
+    for (i = 1; i < n; i++) {
+        secp256k1_ecmult(&ctx->ecmult_ctx, &tmp, &a[i], &x[i], &t[i]);
+        secp256k1_gej_add_var(&res1, &res1, &tmp, NULL);
+    }
+
+    /* Compute res2 = x1*a1 + x2*a2 + x3*a3 + (t1+t2+t3)*g. */
+    tall = t[0];
+    for (i = 1; i < n; i++) {
+        secp256k1_scalar_add(&tall, &tall, &t[i]);
+    }
+    secp256k1_ecmult_points(&ctx->ecmult_ctx, n, &res2, a, x, &tall);
+
+    /* Compare res1 == res2. */
+    secp256k1_gej_neg(&res2, &res2);
+    secp256k1_gej_add_var(&res2, &res2, &res1, NULL);
+    CHECK(secp256k1_gej_is_infinity(&res2));
+}
+
+void run_ecmult_points_ecmult(void) {
+    int i;
+    for (i = 0; i < 8 * count; i++) {
+        test_ecmult_points_ecmult();
+    }
+}
+
+
 void run_point_times_order(void) {
     int i;
     secp256k1_fe_t x = SECP256K1_FE_CONST(0, 0, 0, 0, 0, 0, 0, 2);
@@ -2182,6 +2223,17 @@ void test_schnorr_sign_verify(void) {
             sig64[k][pos] ^= mod;
         }
     }
+
+    CHECK(secp256k1_schnorr_sig_verify_batch(&ctx->ecmult_ctx, 3, sig64, pubkey, test_schnorr_hash, msg32));
+
+    for (i = 0; i < 4; i++) {
+        int pos = secp256k1_rand32() % 64;
+        int mod = 1 + (secp256k1_rand32() % 255);
+        k = secp256k1_rand32() % 3;
+        sig64[k][pos] ^= mod;
+        CHECK(secp256k1_schnorr_sig_verify_batch(&ctx->ecmult_ctx, 3, sig64, pubkey, &test_schnorr_hash, msg32) == 0);
+        sig64[k][pos] ^= mod;
+    }
 }
 
 void test_schnorr_threshold(void) {
@@ -2419,6 +2471,7 @@ int main(int argc, char **argv) {
     run_ecmult_constants();
     run_ecmult_gen_blind();
     run_ec_combine();
+    run_ecmult_points_ecmult();
 
     /* ecdsa tests */
     run_random_pubkeys();

@@ -204,4 +204,112 @@ static int secp256k1_schnorr_sig_combine(unsigned char *sig64, int n, const unsi
     return 1;
 }
 
+static const secp256k1_scalar_t secp256k1_schnorr_batch_coefs[] = {
+    SECP256K1_SCALAR_CONST(1,1,2,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,3,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,5,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,7,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,9,1,1),
+    SECP256K1_SCALAR_CONST(1,3,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,5,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,7,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,9,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,8,1),
+    SECP256K1_SCALAR_CONST(1,1,3,1,2,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,2,1,4,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1),
+    SECP256K1_SCALAR_CONST(1,1,1,1,1,1,1,1)
+};
+
+static int secp256k1_schnorr_sig_verify_batch(const secp256k1_ecmult_context_t* ctx, int n, unsigned char (* const sig64)[64], const secp256k1_ge_t *pubkey, secp256k1_schnorr_msghash_t hash, const unsigned char *msg32) {
+    secp256k1_gej_t S;
+    secp256k1_gej_t P[SECP256K1_SCHNORR_MAX_BATCH * 2 - 1];
+    secp256k1_ge_t R0;
+    secp256k1_scalar_t f[SECP256K1_SCHNORR_MAX_BATCH * 2 - 1];
+    secp256k1_scalar_t ss;
+    secp256k1_fe_t Rx;
+
+    unsigned char hh[32];
+    int overflow;
+    int k;
+
+    VERIFY_CHECK(n <= SECP256K1_SCHNORR_MAX_BATCH);
+    VERIFY_CHECK(n >= 1);
+
+    secp256k1_scalar_set_int(&f[0], 1);
+
+    for (k = 0; k < n; k++) {
+        secp256k1_scalar_t s;
+        secp256k1_ge_t Ra;
+
+        if (k) {
+            f[k - 1] = secp256k1_schnorr_batch_coefs[k - 1];
+        }
+
+        /* Find Rs (into the first half of P). */
+        if (!secp256k1_fe_set_b32(&Rx, sig64[k])) {
+            return 0;
+        }
+        if (!secp256k1_ge_set_xo_var(&Ra, &Rx, 1)) {
+            return 0;
+        }
+        if (k) {
+            secp256k1_gej_set_ge(&P[k - 1], &Ra);
+        } else {
+            R0 = Ra;
+        }
+
+        /* Find s (multiplied by corresponding f, added together in ss). */
+        overflow = 0;
+        secp256k1_scalar_set_b32(&s, sig64[k] + 32, &overflow);
+        if (overflow) {
+            return 0;
+        }
+        if (k) {
+            secp256k1_scalar_mul(&s, &s, &f[k - 1]);
+            secp256k1_scalar_add(&ss, &ss, &s);
+        } else {
+            ss = s;
+        }
+
+        /* Find Qs (into the second half of P). */
+        if (secp256k1_ge_is_infinity(&pubkey[k])) {
+            return 0;
+        }
+        secp256k1_gej_set_ge(&P[k + n - 1], &pubkey[k]);
+
+        /* Find h (multiplied by corresponding f, into the second half of f). */
+        hash(hh, sig64[k], msg32);
+        overflow = 0;
+        secp256k1_scalar_set_b32(&f[k + n - 1], hh, &overflow);
+        if (overflow || secp256k1_scalar_is_zero(&f[k + n - 1])) {
+            return 0;
+        }
+        if (k) {
+            secp256k1_scalar_mul(&f[k + n - 1], &f[k + n - 1], &f[k - 1]);
+        }
+    }
+
+    secp256k1_ecmult_points(ctx, 2 * n - 1, &S, P, f, &ss);
+    secp256k1_gej_add_ge_var(&S, &S, &R0, NULL);
+    return (secp256k1_gej_is_infinity(&S));
+}
+
 #endif

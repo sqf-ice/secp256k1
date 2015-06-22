@@ -497,6 +497,7 @@ int secp256k1_schnorr_recover(const secp256k1_context_t* ctx, const unsigned cha
     DEBUG_CHECK(msg32 != NULL);
     DEBUG_CHECK(sig64 != NULL);
     DEBUG_CHECK(pubkey != NULL);
+    DEBUG_CHECK(pubkeylen != NULL);
 
     if (!secp256k1_schnorr_sig_recover(&ctx->ecmult_ctx, sig64, &q, secp256k1_schnorr_msghash_sha256, msg32)) {
         return 0;
@@ -612,4 +613,27 @@ int secp256k1_schnorr_partial_combine(const secp256k1_context_t* ctx, unsigned c
     DEBUG_CHECK(n >= 1);
     DEBUG_CHECK(sig64sin != NULL);
     return secp256k1_schnorr_sig_combine(sig64, n, sig64sin);
+}
+
+int secp256k1_schnorr_verify_batch(const secp256k1_context_t* ctx, int n, const unsigned char *msg32, const unsigned char **sig64, const unsigned char **pubkey, const int *pubkeylen) {
+    secp256k1_ge_t q[SECP256K1_SCHNORR_MAX_BATCH];
+    unsigned char sig[SECP256K1_SCHNORR_MAX_BATCH][64];
+    int k;
+
+    DEBUG_CHECK(ctx != NULL);
+    DEBUG_CHECK(secp256k1_ecmult_context_is_built(&ctx->ecmult_ctx));
+    DEBUG_CHECK(msg32 != NULL);
+    DEBUG_CHECK(sig64 != NULL);
+    DEBUG_CHECK(pubkey != NULL);
+    DEBUG_CHECK(pubkeylen != NULL);
+    DEBUG_CHECK(n <= SECP256K1_SCHNORR_MAX_BATCH);
+
+    for (k = 0; k < n; k++) {
+        memcpy(&sig[k], sig64[k], 64);
+        if (!secp256k1_eckey_pubkey_parse(&q[k], pubkey[k], pubkeylen[k])) {
+            return 0;
+        }
+    }
+
+    return secp256k1_schnorr_sig_verify_batch(&ctx->ecmult_ctx, n, sig, q, secp256k1_schnorr_msghash_sha256, msg32);
 }

@@ -530,6 +530,26 @@ SECP256K1_WARN_UNUSED_RESULT int secp256k1_schnorr_partial_combine(
 const unsigned char **sig64sin
 ) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(4);
 
+/** Verify multiple signatures created by secp256k1_schnorr_sign.
+ *  Returns: 1: all public keys and signatures correct
+ *           0: at least one incorrect signature
+ *           -1: at least one invalid public key
+ * In:       ctx:       a secp256k1 context object, initialized for verification.
+ *           n:         the number of (message, signature, pubkey) triples to verify.
+ *           msg32:     pointer to a concatenation of n 32-byte message hashes being verified (cannot be NULL)
+ *           sig64:     pointer to n-length array of pointers to the 64-byte signature being verified (cannot be NULL)
+ *           pubkey:    pointer to n-length array of pointers to the the public keys to verify with (cannot be NULL)
+ *           pubkeylen: pointer to n-length array of lengths of pubkeys
+ */
+SECP256K1_WARN_UNUSED_RESULT int secp256k1_schnorr_verify_batch(
+  const secp256k1_context_t* ctx,
+  int n,
+  const unsigned char *msg32,
+  const unsigned char **sig64,
+  const unsigned char **pubkey,
+  const int *pubkeylen
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(6);
+
 # ifdef __cplusplus
 }
 # endif
