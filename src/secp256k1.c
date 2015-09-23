@@ -520,30 +520,6 @@ int secp256k1_context_randomize(secp256k1_context* ctx, const unsigned char *see
     return 1;
 }
 
-int secp256k1_ec_pubkey_combine(const secp256k1_context* ctx, secp256k1_pubkey *pubnonce, const secp256k1_pubkey * const *pubnonces, int n) {
-    int i;
-    secp256k1_gej Qj;
-    secp256k1_ge Q;
-
-    ARG_CHECK(pubnonce != NULL);
-    ARG_CHECK(n >= 1);
-    ARG_CHECK(pubnonces != NULL);
-
-    secp256k1_gej_set_infinity(&Qj);
-
-    for (i = 0; i < n; i++) {
-        secp256k1_pubkey_load(ctx, &Q, pubnonces[i]);
-        secp256k1_gej_add_ge(&Qj, &Qj, &Q);
-    }
-    if (secp256k1_gej_is_infinity(&Qj)) {
-        memset(pubnonce, 0, sizeof(*pubnonce));
-        return 0;
-    }
-    secp256k1_ge_set_gej(&Q, &Qj);
-    secp256k1_pubkey_save(pubnonce, &Q);
-    return 1;
-}
-
 #ifdef ENABLE_MODULE_ECDH
 # include "modules/ecdh/main_impl.h"
 #endif

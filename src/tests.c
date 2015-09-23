@@ -1426,38 +1426,6 @@ void run_ge(void) {
     test_add_neg_y_diff_x();
 }
 
-void test_ec_combine(void) {
-    secp256k1_scalar sum = SECP256K1_SCALAR_CONST(0, 0, 0, 0, 0, 0, 0, 0);
-    secp256k1_pubkey data[6];
-    const secp256k1_pubkey* d[6];
-    secp256k1_pubkey sd;
-    secp256k1_pubkey sd2;
-    secp256k1_gej Qj;
-    secp256k1_ge Q;
-    int i;
-    for (i = 1; i <= 6; i++) {
-        secp256k1_scalar s;
-        random_scalar_order_test(&s);
-        secp256k1_scalar_add(&sum, &sum, &s);
-        secp256k1_ecmult_gen(&ctx->ecmult_gen_ctx, &Qj, &s);
-        secp256k1_ge_set_gej(&Q, &Qj);
-        secp256k1_pubkey_save(&data[i - 1], &Q);
-        d[i - 1] = &data[i - 1];
-        secp256k1_ecmult_gen(&ctx->ecmult_gen_ctx, &Qj, &sum);
-        secp256k1_ge_set_gej(&Q, &Qj);
-        secp256k1_pubkey_save(&sd, &Q);
-        CHECK(secp256k1_ec_pubkey_combine(ctx, &sd2, d, i) == 1);
-        CHECK(memcmp(&sd, &sd2, sizeof(sd)) == 0);
-    }
-}
-
-void run_ec_combine(void) {
-    int i;
-    for (i = 0; i < count * 8; i++) {
-         test_ec_combine();
-    }
-}
-
 /***** ECMULT TESTS *****/
 
 void run_ecmult_chain(void) {
@@ -3559,7 +3527,6 @@ int main(int argc, char **argv) {
     run_ecmult_constants();
     run_ecmult_gen_blind();
     run_ecmult_const_tests();
-    run_ec_combine();
 
     /* endomorphism tests */
 #ifdef USE_ENDOMORPHISM
