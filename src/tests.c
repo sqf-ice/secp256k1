@@ -2026,6 +2026,298 @@ void run_ecdsa_end_to_end(void) {
     }
 }
 
+int test_ecdsa_der_parse(const unsigned char *sig, size_t siglen) {
+    static const unsigned char zeroes[32] = {0};
+    static const unsigned char max_scalar[32] = {
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe,
+        0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b,
+        0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36, 0x41, 0x40
+    };
+
+    int ret = 0;
+
+    secp256k1_ecdsa_signature sig_ber_permissive;
+    unsigned char roundtrip_ber_permissive[2048];
+    unsigned char compact_ber_permissive[64];
+    size_t len_ber_permissive = 2048;
+    int parsed_ber_permissive = 0, valid_ber_permissive = 0, roundtrips_ber_permissive = 0;
+
+    secp256k1_ecdsa_signature sig_der;
+    unsigned char roundtrip_der[2048];
+    unsigned char compact_der[64];
+    size_t len_der = 2048;
+    int parsed_der = 0, valid_der = 0, roundtrips_der = 0;
+
+#ifdef ENABLE_OPENSSL_TESTS
+    ECDSA_SIG *sig_openssl;
+    const unsigned char *sigptr;
+    unsigned char roundtrip_openssl[2048];
+    int len_openssl = 2048;
+    int parsed_openssl, valid_openssl = 0, roundtrips_openssl = 0;
+#endif
+
+    parsed_ber_permissive = secp256k1_ecdsa_signature_parse_ber_permissive(ctx, &sig_ber_permissive, sig, siglen);
+    if (parsed_ber_permissive) {
+        ret |= (!secp256k1_ecdsa_signature_serialize_compact(ctx, compact_ber_permissive, &sig_ber_permissive));
+        valid_ber_permissive = (memcmp(compact_ber_permissive, zeroes, 32) != 0) && (memcmp(compact_ber_permissive + 32, zeroes, 32) != 0);
+    }
+    if (valid_ber_permissive) {
+        ret |= (!secp256k1_ecdsa_signature_serialize_der(ctx, roundtrip_ber_permissive, &len_ber_permissive, &sig_ber_permissive)) << 1;
+        roundtrips_ber_permissive = (len_ber_permissive == siglen) && memcmp(roundtrip_ber_permissive, sig, siglen) == 0;
+    }
+
+    parsed_der = secp256k1_ecdsa_signature_parse_der(ctx, &sig_der, sig, siglen);
+    if (parsed_der) {
+        ret |= (!secp256k1_ecdsa_signature_serialize_compact(ctx, compact_der, &sig_der)) << 2;
+        valid_der = (memcmp(compact_der, zeroes, 32) != 0) && (memcmp(compact_der + 32, zeroes, 32) != 0);
+    }
+    if (valid_der) {
+        ret |= (!secp256k1_ecdsa_signature_serialize_der(ctx, roundtrip_der, &len_der, &sig_der)) << 3;
+        roundtrips_der = (len_der == siglen) && memcmp(roundtrip_der, sig, siglen) == 0;
+    }
+
+    ret |= (parsed_der && !parsed_ber_permissive) << 4;
+    ret |= (valid_der && !valid_ber_permissive) << 5;
+    ret |= (roundtrips_der != roundtrips_ber_permissive) << 6;
+    if (valid_ber_permissive) {
+        ret |= (!secp256k1_ecdsa_signature_parse_der(ctx, &sig_der, roundtrip_ber_permissive, len_ber_permissive)) << 7;
+    }
+    if (valid_der) {
+        ret |= (!roundtrips_der) << 18;
+    }
+    if (roundtrips_der) {
+        ret |= (memcmp(compact_der, compact_ber_permissive, 64) != 0) << 8;
+        ret |= (len_ber_permissive != len_der) << 9;
+        ret |= (memcmp(roundtrip_der, roundtrip_ber_permissive, len_ber_permissive) != 0) << 10;
+    }
+
+#ifdef ENABLE_OPENSSL_TESTS
+    sig_openssl = ECDSA_SIG_new();
+    sigptr = sig;
+    parsed_openssl = (d2i_ECDSA_SIG(&sig_openssl, &sigptr, siglen) != NULL);
+    if (parsed_openssl) {
+        valid_openssl = !BN_is_negative(sig_openssl->r) && !BN_is_negative(sig_openssl->s) && BN_num_bits(sig_openssl->r) > 0 && BN_num_bits(sig_openssl->r) <= 256 && BN_num_bits(sig_openssl->s) > 0 && BN_num_bits(sig_openssl->s) <= 256;
+        if (valid_openssl) {
+            unsigned char tmp[32] = {0};
+            BN_bn2bin(sig_openssl->r, tmp + 32 - BN_num_bytes(sig_openssl->r));
+            valid_openssl = memcmp(tmp, max_scalar, 32) < 0;
+        }
+        if (valid_openssl) {
+            unsigned char tmp[32] = {0};
+            BN_bn2bin(sig_openssl->s, tmp + 32 - BN_num_bytes(sig_openssl->s));
+            valid_openssl = memcmp(tmp, max_scalar, 32) < 0;
+        }
+    }
+    len_openssl = i2d_ECDSA_SIG(sig_openssl, NULL);
+    if (len_openssl <= 2048) {
+        unsigned char *ptr = roundtrip_openssl;
+        ret |= (i2d_ECDSA_SIG(sig_openssl, &ptr) != len_openssl) << 11;
+        roundtrips_openssl = valid_openssl && ((size_t)len_openssl == siglen) && (memcmp(roundtrip_openssl, sig, siglen) == 0);
+    } else {
+        len_openssl = 0;
+    }
+    ECDSA_SIG_free(sig_openssl);
+
+    ret |= (parsed_openssl && !parsed_ber_permissive) << 12;
+    if (parsed_openssl) {
+        ret |= (valid_ber_permissive != valid_openssl) << 13;
+        if (valid_openssl != valid_ber_permissive) {
+            int q;
+            fprintf(stderr, "valid_openssl=%i valid_ber=%i openssl roundtrip: ", valid_openssl, valid_ber_permissive);
+            for (q = 0; q < len_openssl; q++) {
+                 fprintf(stderr, "%02x", (unsigned int)roundtrip_openssl[q]);
+            }
+            fprintf(stderr, "\n");
+        }
+        ret |= (roundtrips_ber_permissive != roundtrips_openssl) << 14;
+    }
+    if (valid_openssl) {
+        ret |= (!secp256k1_ecdsa_signature_parse_der(ctx, &sig_der, roundtrip_openssl, len_openssl)) << 15;
+    }
+    if (roundtrips_openssl) {
+        ret |= (len_ber_permissive != (size_t)len_openssl) << 16;
+        ret |= (memcmp(roundtrip_ber_permissive, roundtrip_openssl, len_ber_permissive) != 0) << 17;
+    }
+#endif
+    return ret;
+}
+
+static void assign_big_endian(unsigned char *ptr, size_t ptrlen, uint32_t val) {
+    size_t i;
+    for (i = 0; i < ptrlen; i++) {
+        int shift = ptrlen - 1 - i;
+        if (shift >= 4) {
+            ptr[i] = 0;
+        } else {
+            ptr[i] = (val >> shift) & 0xFF;
+        }
+    }
+}
+
+static void damage_array(unsigned char *sig, size_t *len) {
+    int pos;
+    switch (secp256k1_rand_bits(3)) {
+    case 0:
+        /* Delete a byte. */
+        pos = secp256k1_rand_int(*len);
+        memmove(sig + pos, sig + pos + 1, *len - pos - 1);
+        (*len)--;
+        return;
+    case 1:
+        /* Insert a byte. */
+        pos = secp256k1_rand_int(1 + *len);
+        memmove(sig + pos + 1, sig + pos, *len - pos);
+        sig[pos] = secp256k1_rand_bits(8);
+        (*len)++;
+        return;
+    case 2:
+    case 3:
+        /* Modify a byte. */
+        sig[secp256k1_rand_int(*len)] += 1 + secp256k1_rand_int(255);
+        return;
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+        /* Modify a bit. */
+        sig[secp256k1_rand_int(*len)] ^= 1 << secp256k1_rand_bits(3);
+        return;
+    }
+}
+
+static void random_ber_signature(unsigned char *sig, size_t *len) {
+    int der;
+    int nlow[2], nlen[2], nlenlen[2], nhbit[2], nhbyte[2], nzlen[2];
+    int tlen, elen, glen;
+    int indet;
+    int n;
+
+    der = secp256k1_rand_bits(2) == 0;
+    indet = der ? 0 : secp256k1_rand_int(10) == 0;
+
+    for (n = 0; n < 2; n++) {
+        /* We generate two classes of numbers: nlow==1 "low" ones (up to 32 bytes), nlow==0 "high" ones (32 bytes with 129 top bits set, or larger than 32 bytes) */
+        nlow[n] = der ? 1 : (secp256k1_rand_bits(3) != 0);
+        /* The length of the number in bytes (the first byte of which will always be nonzero) */
+        nlen[n] = nlow[n] ? secp256k1_rand_int(33) : 32 + secp256k1_rand_int(200) * secp256k1_rand_int(8) / 8;
+        /* The top bit of the number. */
+        nhbit[n] = (nlow[n] == 0 && nlen[n] == 32) ? 1 : (nlen[n] == 0 ? 0 : secp256k1_rand_bits(1));
+        /* The top byte of the number (after the potential hardcoded 16 0xFF characters for "high" 32 bytes numbers) */
+        nhbyte[n] = nlen[n] == 0 ? 0 : (nhbit[n] ? 128 + secp256k1_rand_bits(7) : 1 + secp256k1_rand_int(127));
+        /* The number of zero bytes in front of the number (which is 0 or 1 in case of DER, otherwise we extend up to 300 bytes) */
+        nzlen[n] = der ? ((nlen[n] == 0 || nhbit[n]) ? 1 : 0) : (nlow[n] ? secp256k1_rand_int(3) : secp256k1_rand_int(300 - nlen[n]) * secp256k1_rand_int(8) / 8);
+        /* The length of the length descriptor for the number. 0 means short encoding, anything else is long encoding. */
+        nlenlen[n] = nlen[n] + nzlen[n] < 128 ? 0 : (nlen[n] + nzlen[n] < 256 ? 1 : 2);
+        if (!der) {
+            nlenlen[n] += secp256k1_rand_int(127 - nlenlen[n]) * secp256k1_rand_int(16) * secp256k1_rand_int(16) / 256;
+        }
+    }
+
+    /* The total length of the data to go, so far */
+    tlen = 2 + nlenlen[0] + nlen[0] + 2 + nlenlen[1] + nlen[1];
+
+    /* The length of the garbage inside the tuple. */
+    elen = (der || indet) ? 0 : secp256k1_rand_int(980 - tlen) * secp256k1_rand_int(8) / 8;
+    tlen += elen;
+
+    /* The length of the garbage after the end of the tuple. */
+    glen = der ? 0 : secp256k1_rand_int(990 - tlen) * secp256k1_rand_int(8) / 8;
+
+    /* Write the tuple header. */
+    sig[(*len)++] = 0x30;
+    if (indet) {
+        /* Indeterminate length */
+        sig[(*len)++] = 0x80;
+    } else {
+        int tlenlen = tlen < 128 ? 0 : (tlen < 256 ? 1 : 2);
+        if (!der) {
+            tlenlen += secp256k1_rand_int(127 - tlenlen) * secp256k1_rand_int(16) * secp256k1_rand_int(16) / 256;
+        }
+        if (tlenlen == 0) {
+            /* Short length notation */
+            sig[(*len)++] = tlen;
+        } else {
+            /* Long length notation */
+            sig[(*len)++] = 128 + tlenlen;
+            assign_big_endian(sig + *len, tlenlen, tlen);
+            *len += tlenlen;
+        }
+    }
+
+    for (n = 0; n < 2; n++) {
+        /* Write the integer header. */
+        sig[(*len)++] = 0x02;
+        if (nlenlen[n] == 0) {
+            /* Short length notation */
+            sig[(*len)++] = nlen[n] + nzlen[n];
+        } else {
+            /* Long length notation. */
+            sig[(*len)++] = 128 + nlenlen[n];
+            assign_big_endian(sig + *len, nlenlen[n], nlen[n] + nzlen[n]);
+            *len += nlenlen[n];
+        }
+        /* Write zero padding */
+        while (nzlen[n] > 0) {
+            sig[(*len)++] = 0x00;
+            nzlen[n]--;
+        }
+        if (nlen[n] == 32 && !nlow[n]) {
+            /* Special extra 16 0xFF bytes in "high" 32-byte numbers */
+            int i;
+            for (i = 0; i < 16; i++) {
+                sig[(*len)++] = 0xFF;
+            }
+            nlen[n] -= 16;
+        }
+        /* Write first byte of number */
+        if (nlen[n] > 0) {
+            sig[(*len)++] = nhbyte[n];
+            nlen[n]--;
+        }
+        /* Generate remaining random bytes of number */
+        secp256k1_rand_bytes_test(sig + *len, nlen[n]);
+        *len += nlen[n];
+        nlen[n] = 0;
+    }
+
+    /* Generate random garbage inside tuple. */
+    secp256k1_rand_bytes_test(sig + *len, elen);
+    *len += elen;
+
+    /* Generate end-of-contents bytes. */
+    if (indet) {
+        sig[(*len)++] = 0;
+        sig[(*len)++] = 0;
+    }
+
+    /* Generate random garbage outside tuple. */
+    secp256k1_rand_bytes_test(sig + *len, glen);
+    len += glen;
+}
+
+void run_ecdsa_der_parse(void) {
+    int i,j,k;
+    for (i = 0; i < 1000 * count; i++) {
+        unsigned char buffer[2048];
+        size_t buflen = 0;
+        random_ber_signature(buffer, &buflen);
+        for (j = 0; j < 16; j++) {
+            int ret;
+            damage_array(buffer, &buflen);
+            ret = test_ecdsa_der_parse(buffer, buflen);
+            if (ret) {
+                fprintf(stderr, "Test case (fail %X): ", (unsigned int)ret);
+                for (k = 0; k < buflen; k++) {
+                    fprintf(stderr, "%02x", (int)(buffer[k]));
+                }
+                fprintf(stderr, "\n");
+            }
+        }
+    }
+}
+
+
 /* Tests several edge cases. */
 void test_ecdsa_edge_cases(void) {
     int t;
@@ -2200,7 +2492,7 @@ void test_ecdsa_openssl(void) {
     ec_key = get_openssl_key(&key);
     CHECK(ec_key != NULL);
     CHECK(ECDSA_sign(0, message, sizeof(message), signature, &sigsize, ec_key));
-    CHECK(secp256k1_ecdsa_sig_parse(&sigr, &sigs, signature, sigsize));
+    CHECK(secp256k1_ecdsa_sig_parse(&sigr, &sigs, signature, sigsize, 0));
     CHECK(secp256k1_ecdsa_sig_verify(&ctx->ecmult_ctx, &sigr, &sigs, &q, &msg));
     secp256k1_scalar_set_int(&one, 1);
     secp256k1_scalar_add(&msg2, &msg, &one);
@@ -2215,7 +2507,7 @@ void test_ecdsa_openssl(void) {
 
 void run_ecdsa_openssl(void) {
     int i;
-    for (i = 0; i < 10*count; i++) {
+    for (i = 0; i < 100*count; i++) {
         test_ecdsa_openssl();
     }
 }
@@ -2329,6 +2621,7 @@ int main(int argc, char **argv) {
 
     /* ecdsa tests */
     run_random_pubkeys();
+    run_ecdsa_der_parse();
     run_ecdsa_sign_verify();
     run_ecdsa_end_to_end();
     run_ecdsa_edge_cases();

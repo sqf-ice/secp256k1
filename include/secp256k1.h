@@ -271,6 +271,19 @@ SECP256K1_API int secp256k1_ec_pubkey_serialize(
     unsigned int flags
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4);
 
+/** Parse a 64-byte ECDSA signature.
+ *
+ *  Returns: 1 when the signature could be parsed, 0 otherwise.
+ *  Args: ctx:      a secp256k1 context object
+ *  Out:  sig:      a pointer to a signature object
+ *  In:   input64:  a pointer to the 64-byte array to parse
+ */
+SECP256K1_API int secp256k1_ecdsa_signature_parse_compact(
+    const secp256k1_context* ctx,
+    secp256k1_ecdsa_signature* sig,
+    const unsigned char *input64
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3);
+
 /** Parse a DER ECDSA signature.
  *
  *  Returns: 1 when the signature could be parsed, 0 otherwise.
@@ -279,9 +292,35 @@ SECP256K1_API int secp256k1_ec_pubkey_serialize(
  *  In:   input:    a pointer to the signature to be parsed
  *        inputlen: the length of the array pointed to be input
  *
- *  Note that this function also supports some violations of DER and even BER.
+ *  This function will accept any valid DER encoded signature up to 65535 bytes,
+ *  even if the encoded numbers are out of range. Signature validation is
+ *  guaranteed to fail in that case.
  */
 SECP256K1_API int secp256k1_ecdsa_signature_parse_der(
+    const secp256k1_context* ctx,
+    secp256k1_ecdsa_signature* sig,
+    const unsigned char *input,
+    size_t inputlen
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3);
+
+/** Parse a BER ECDSA signature, accepting many violations.
+ *
+ *  Returns: 1 when the signature could be parsed, 0 otherwise.
+ *  Args: ctx:      a secp256k1 context object
+ *  Out:  sig:      a pointer to a signature object
+ *  In:   input:    a pointer to the signature to be parsed
+ *        inputlen: the length of the array pointed to be input
+ *
+ *  This function will accept any BER encoded signature up to 65535 bytes,
+ *  with many violations. It will accept garbage after the signature, or after
+ *  the second encoded integer, as well as assume that all numbers are positive,
+ *  even those that have their highest bit set.
+ *
+ *  This function is purely provided for backwards compatibility with protocols
+ *  that need to support non-DER signatures. It is discouraged to use this in
+ *  new protocols.
+ */
+SECP256K1_API int secp256k1_ecdsa_signature_parse_ber_permissive(
     const secp256k1_context* ctx,
     secp256k1_ecdsa_signature* sig,
     const unsigned char *input,
@@ -305,6 +344,19 @@ SECP256K1_API int secp256k1_ecdsa_signature_serialize_der(
     size_t *outputlen,
     const secp256k1_ecdsa_signature* sig
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4);
+
+/** Serialize an ECDSA signature in compact (64 byte) format.
+ *
+ *  Returns: 1
+ *  Args:   ctx:       a secp256k1 context object
+ *  Out:    output64:  a pointer to a 64-byte array to store the compact serialization
+ *  In:     sig:       a pointer to an initialized signature object
+ */
+SECP256K1_API int secp256k1_ecdsa_signature_serialize_compact(
+    const secp256k1_context* ctx,
+    unsigned char *output64,
+    const secp256k1_ecdsa_signature* sig
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3);
 
 /** Verify an ECDSA signature.
  *

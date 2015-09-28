@@ -46,65 +46,238 @@ static const secp256k1_fe secp256k1_ecdsa_const_p_minus_order = SECP256K1_FE_CON
     0, 0, 0, 1, 0x45512319UL, 0x50B75FC4UL, 0x402DA172UL, 0x2FC9BAEEUL
 );
 
-static int secp256k1_ecdsa_sig_parse(secp256k1_scalar *rr, secp256k1_scalar *rs, const unsigned char *sig, size_t size) {
+static const int secp256k1_max_ber_len_bytes = 2;
+
+/* is_indeterminate==NULL means we don't want to accept indeterminate length */
+static int secp256k1_ber_read_len(const unsigned char **sigp, const unsigned char *sigend, int strict, int *is_indeterminate) {
+    int lenleft, b1;
+    size_t ret = 0;
+    if (((size_t)(sigend - *sigp) & ~((((size_t)0x100) << secp256k1_max_ber_len_bytes) - 1)) != 0) {
+        /** Maximum size exceeded */
+        return -1;
+    }
+    if (is_indeterminate != NULL) {
+        *is_indeterminate = 0;
+    }
+    if (*sigp == sigend) {
+        return 0;
+    }
+    b1 = *((*sigp)++);
+    if (strict && b1 == 0xFF) {
+        /* X.690-0207 8.1.3.5.c the value 0xFF shall not be used. */
+        return -1;
+    }
+    if ((b1 & 0x80) == 0) {
+        /* X.690-0207 8.1.3.4 short form length octets */
+        return b1;
+    }
+    if (b1 == 0x80) {
+        /* X.690-207 8.1.3.6.1 indefinite form length octets */
+        if (strict || is_indeterminate == NULL) {
+            return -1;
+        }
+        if (is_indeterminate != NULL) {
+            *is_indeterminate = 1;
+        }
+        return sigend - *sigp;
+    }
+    /* X.690-207 8.1.3.5 long form length octets */
+    lenleft = b1 & 0x7F;
+    while (lenleft > 0) {
+        if (*sigp == sigend) {
+            return 0;
+        }
+        if (**sigp != 0) {
+            break;
+        }
+        if (strict) {
+            /* Not the shortest possible length encoding. */
+            return -1;
+        }
+        (*sigp)++;
+        lenleft--;
+    }
+    if (lenleft > secp256k1_max_ber_len_bytes) {
+        /* Max size exceeded */
+        return -1;
+    }
+    while (lenleft > 0) {
+        if (*sigp == sigend) {
+            return -1;
+        }
+        ret = (ret << 8) | **sigp;
+        (*sigp)++;
+        lenleft--;
+    }
+    if (strict && ret < 128) {
+        /* Not the shortest possible length encoding. */
+        return -1;
+    }
+    return ret;
+}
+
+/** Only supports types up to 30 */
+static int secp256k1_ber_check_type(const unsigned char **sigp, const unsigned char *sigend, int strict, int cls, int constructed, int typ, int *mistype) {
+    int mask = 0xFF;
+    int highval = (cls << 6) | (constructed << 5);
+    if (!strict) {
+        mask = 0x1F;
+    }
+    if (*sigp == sigend) {
+        return 0;
+    }
+    if (((**sigp ^ (typ | highval)) & mask) == 0) {
+        /* Immediately the right type in one byte (X.690-0207 8.1.2.2) */
+        if (mistype) {
+            *mistype = (((**sigp ^ (typ | highval)) & 0xFF) != 0);
+        }
+        (*sigp)++;
+        return 1;
+    }
+    if (strict) {
+        return 0;
+    }
+    if (((**sigp ^ (0x1f | highval)) & mask) != 0) {
+        /* Not a correct longer tag (X.690-0207 8.1.2.4.1) */
+        return 0;
+    }
+    if (mistype) {
+        *mistype = (((**sigp ^ (0x1f | highval)) & 0xFF) != 0);
+    }
+    (*sigp)++;
+    while (*sigp != sigend && **sigp == 0x80) {
+        /* Violations of X.690-0207 8.1.2.4.2.c) */
+        (*sigp)++;
+    }
+    if (*sigp == sigend) {
+        return 0;
+    }
+    if (**sigp != typ) {
+        /* Not correct long tag encoding (X.690-0207 8.1.2.4.2) */
+        return 0;
+    }
+    (*sigp)++;
+    return 1;
+}
+
+static int secp256k1_ecdsa_sig_parse(secp256k1_scalar *rr, secp256k1_scalar *rs, const unsigned char *sig, size_t size, int strict) {
     unsigned char ra[32] = {0}, sa[32] = {0};
-    const unsigned char *rp;
-    const unsigned char *sp;
-    size_t lenr;
-    size_t lens;
-    int overflow;
-    if (sig[0] != 0x30) {
+    const unsigned char *sigend = sig + size;
+    const unsigned char *seqend;
+    int overflow = 0;
+    int mistype = 0;
+    int indeterminate = 0, indeterminate_s = 0;
+    int rlen;
+    if (!secp256k1_ber_check_type(&sig, sigend, strict, 0, 1, 0x10, NULL)) {
+        /* The encoding doesn't start with a constructed sequence (X.690-0207 8.9.1). */
         return 0;
     }
-    lenr = sig[3];
-    if (5+lenr >= size) {
+    rlen = secp256k1_ber_read_len(&sig, sigend, strict, &indeterminate);
+    if (rlen < 0 || (strict && sig + rlen > sigend)) {
+        /* Tuple exceeds bounds */
         return 0;
     }
-    lens = sig[lenr+5];
-    if (sig[1] != lenr+lens+4) {
+    if (strict && sig + rlen != sigend) {
+        /* Garbage after tuple. */
         return 0;
     }
-    if (lenr+lens+6 > size) {
+    if (sig + rlen < sigend) {
+        seqend = sig + rlen;
+    } else {
+        seqend = sigend;
+    }
+
+    if (!secp256k1_ber_check_type(&sig, sigend, strict, 0, 0, 0x02, &mistype)) {
+        /* R isn't a primitive integer (X.690-0207 8.3.1). */
         return 0;
     }
-    if (sig[2] != 0x02) {
+    if (mistype) {
+        overflow = 1;
+    }
+    rlen = secp256k1_ber_read_len(&sig, sigend, strict, NULL);
+    if (rlen < 0 || (strict && rlen == 0) || sig + rlen > sigend) {
+        /* R exceeds bounds or not at least length 1 (X.690-0207 8.3.1).  */
         return 0;
     }
-    if (lenr == 0) {
+    if (strict && *sig == 0x00 && rlen > 1 && (sig[1] & 0x80) == 0x00) {
+        /* Excessive zero padding for R. */
         return 0;
     }
-    if (sig[lenr+4] != 0x02) {
+    if (strict && (*sig & 0x80) == 0x80) {
+        /* Negative R. */
+        overflow = 1;
+    }
+    while (rlen > 0 && *sig == 0) {
+        /* Skip leading R zero bytes */
+        rlen--;
+        sig++;
+    }
+    if (rlen > 32) {
+        overflow = 1;
+    }
+    if (!overflow) {
+        memcpy(ra + 32 - rlen, sig, rlen);
+        secp256k1_scalar_set_b32(rr, ra, &overflow);
+    }
+    sig += rlen;
+
+    if (!secp256k1_ber_check_type(&sig, sigend, strict, 0, 0, 0x02, &mistype)) {
+        /* S isn't a primitive integer (X.690-0207 8.3.1). */
         return 0;
     }
-    if (lens == 0) {
+    if (mistype) {
+        overflow = 1;
+    }
+    rlen = secp256k1_ber_read_len(&sig, sigend, strict, &indeterminate_s);
+    if (indeterminate_s) {
+        rlen = seqend - sig;
+    }
+    if (rlen < 0 || (strict && rlen == 0) || sig + rlen > sigend) {
+        /* S exceeds bounds or not at least length 1 (X.690-0207 8.3.1). */
         return 0;
     }
-    sp = sig + 6 + lenr;
-    while (lens > 0 && sp[0] == 0) {
-        lens--;
-        sp++;
-    }
-    if (lens > 32) {
+    if (strict && *sig == 0x00 && rlen > 1 && (sig[1] & 0x80) == 0x00) {
+        /* Excessive zero padding for S. */
         return 0;
     }
-    rp = sig + 4;
-    while (lenr > 0 && rp[0] == 0) {
-        lenr--;
-        rp++;
+    if (strict && (*sig & 0x80) == 0x80) {
+        /* Negative S. */
+        overflow = 1;
     }
-    if (lenr > 32) {
+    while (rlen > 0 && *sig == 0) {
+        /* Skip leading S zero bytes */
+        rlen--;
+        sig++;
+    }
+    if (rlen > 32) {
+        overflow = 1;
+    }
+    if (!overflow) {
+        memcpy(sa + 32 - rlen, sig, rlen);
+        secp256k1_scalar_set_b32(rs, sa, &overflow);
+    }
+    sig += rlen;
+
+    if (indeterminate) {
+        /* X.690-0207 8.1.5 End-of-contents octets */
+        if (sigend == sig || *(sig++) != 0x00) {
+            return 0;
+        }
+        if (sigend == sig || *(sig++) != 0x00) {
+            return 0;
+        }
+    }
+
+    if (strict && sig != sigend) {
+        /* Trailing garbage inside tuple. */
         return 0;
     }
-    memcpy(ra + 32 - lenr, rp, lenr);
-    memcpy(sa + 32 - lens, sp, lens);
-    overflow = 0;
-    secp256k1_scalar_set_b32(rr, ra, &overflow);
+
     if (overflow) {
-        return 0;
-    }
-    secp256k1_scalar_set_b32(rs, sa, &overflow);
-    if (overflow) {
-        return 0;
+        /* Correctly parsed, but unrepresentable as scalar (and thus certainly
+           invalid signature) */
+        secp256k1_scalar_set_int(rr, 0);
+        secp256k1_scalar_set_int(rs, 0);
     }
     return 1;
 }
