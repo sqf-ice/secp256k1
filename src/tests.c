@@ -2263,6 +2263,49 @@ void run_group_decompress(void) {
 
 /***** ECMULT TESTS *****/
 
+void ecmult_mult(void) {
+    secp256k1_scalar g1, g2, gs;
+    secp256k1_scalar na1, na2;
+    secp256k1_ge a1, a2;
+    secp256k1_gej aj1, aj2;
+    secp256k1_gej r_one1, r_one2, r_two;
+    const secp256k1_scalar* na[2];
+    const secp256k1_gej* aj[2];
+
+    random_scalar_order(&g1);
+    random_scalar_order(&g2);
+    random_scalar_order(&na1);
+    random_scalar_order(&na2);
+    secp256k1_scalar_add(&gs, &g1, &g2);
+
+    random_group_element_test(&a1);
+    random_group_element_test(&a2);
+    random_group_element_jacobian_test(&aj1, &a1);
+    random_group_element_jacobian_test(&aj2, &a2);
+
+    secp256k1_ecmult(&ctx->ecmult_ctx, &r_one1, &aj1, &na1, &g1);
+    secp256k1_ecmult(&ctx->ecmult_ctx, &r_one2, &aj2, &na2, &g2);
+
+    na[0] = &na1;
+    na[1] = &na2;
+    aj[0] = &aj1;
+    aj[1] = &aj2;
+
+    secp256k1_ecmult_mult(&ctx->ecmult_ctx, &r_two, 2, aj, na, &gs);
+
+    secp256k1_gej_neg(&r_two, &r_two);
+    secp256k1_gej_add_var(&r_two, &r_two, &r_one1, NULL);
+    secp256k1_gej_add_var(&r_two, &r_two, &r_one2, NULL);
+    CHECK(secp256k1_gej_is_infinity(&r_two));
+}
+
+void run_ecmult_mult(void) {
+    int i;
+    for (i = 0; i < count * 100; i++) {
+        ecmult_mult();
+    }
+}
+
 void run_ecmult_chain(void) {
     /* random starting point A (on the curve) */
     secp256k1_gej a = SECP256K1_GEJ_CONST(
@@ -4492,6 +4535,7 @@ int main(int argc, char **argv) {
     run_ecmult_constants();
     run_ecmult_gen_blind();
     run_ecmult_const_tests();
+    run_ecmult_mult();
     run_ec_combine();
 
     /* endomorphism tests */
