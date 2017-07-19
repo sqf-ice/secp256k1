@@ -276,7 +276,7 @@ int secp256k1_aggsig_verify(const secp256k1_context* ctx, const unsigned char *s
     secp256k1_compute_prehash(ctx, cbdata.prehash, pubkeys, n_pubkeys, &r_ge, msg32);
 
     /* Compute sum sG - e_i*P_i, which should be R */
-    if (!secp256k1_ecmult_multi(&pk_sum, &g_sc, secp256k1_aggsig_verify_callback, &cbdata, n_pubkeys)) {
+    if (!secp256k1_ecmult_multi(&ctx->ecmult_ctx, &pk_sum, &g_sc, secp256k1_aggsig_verify_callback, &cbdata, n_pubkeys)) {
         return 0;
     }
 
