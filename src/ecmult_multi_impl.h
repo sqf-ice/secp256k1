@@ -215,10 +215,38 @@ SECP256K1_INLINE static void secp256k1_ecmult_endo_split(secp256k1_scalar *s1, s
 
 static int secp256k1_ecmult_multi(const secp256k1_ecmult_context *ctx, secp256k1_gej *r, const secp256k1_scalar *inp_g_sc, secp256k1_ecmult_multi_callback cb, void *cbdata, size_t n) {
     secp256k1_gej tmp;
-    secp256k1_gej pt[SECP256K1_ECMULT_MULTI_MAX_N + 1];  /* +1 in case we spill over doing the endomorphism 2 points at a time */
-    secp256k1_scalar sc[SECP256K1_ECMULT_MULTI_MAX_N + 1];
     size_t idx = 0;
     size_t point_idx = 0;
+#ifndef USE_STRAUSS
+    secp256k1_gej pt[STRAUSS_MAX_POINTS];
+    secp256k1_scalar sc[STRAUSS_MAX_POINTS];
+    int first = 1;
+
+    while (point_idx < n) {
+        if (idx == STRAUSS_MAX_POINTS) {
+            secp256k1_ecmult_strauss(ctx, first ? r : &tmp, idx, pt, sc, first ? inp_g_sc : NULL);
+            if (!first) {
+                secp256k1_gej_add_var(r, r, &tmp, NULL);
+            }
+            first = 0;
+            idx = 0;
+        }
+        if (!cb(&sc[idx], &pt[idx], point_idx, cbdata)) {
+            return 0;
+        }
+        ++point_idx;
+        ++idx;
+    }
+    if (idx) {
+        secp256k1_ecmult_strauss(ctx, first ? r : &tmp, idx, pt, sc, first ? inp_g_sc : NULL);
+        if (!first) {
+            secp256k1_gej_add_var(r, r, &tmp, NULL);
+        }
+    }
+    return 1;
+#else
+    secp256k1_gej pt[SECP256K1_ECMULT_MULTI_MAX_N + 1];  /* +1 in case we spill over doing the endomorphism 2 points at a time */
+    secp256k1_scalar sc[SECP256K1_ECMULT_MULTI_MAX_N + 1];
 
     sc[0] = *inp_g_sc;
     secp256k1_gej_set_ge(&pt[0], &secp256k1_ge_const_g);
@@ -248,5 +276,6 @@ static int secp256k1_ecmult_multi(const secp256k1_ecmult_context *ctx, secp256k1
     secp256k1_ecmult_multi_bos_coster(&tmp, sc, pt, idx);
     secp256k1_gej_add_var(r, r, &tmp, NULL);
     return 1;
+#endif
 }
 
