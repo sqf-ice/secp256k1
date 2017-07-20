@@ -10,10 +10,12 @@
 #include "group.h"
 #include "scalar.h"
 
+#include "size.h"
+
 #ifdef USE_ENDOMORPHISM
-#define SECP256K1_ECMULT_MULTI_MAX_N	64
+#define SECP256K1_ECMULT_MULTI_MAX_N (2*((SIZE)+2))
 #else
-#define SECP256K1_ECMULT_MULTI_MAX_N	32
+#define SECP256K1_ECMULT_MULTI_MAX_N ((SIZE) + 2)
 #endif
 
 typedef int (secp256k1_ecmult_multi_callback)(secp256k1_scalar *sc, secp256k1_gej *pt, size_t idx, void *data);
