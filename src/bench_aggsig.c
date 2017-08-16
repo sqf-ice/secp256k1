@@ -10,8 +10,11 @@
 #include "include/secp256k1_aggsig.h"
 #include "util.h"
 #include "bench.h"
+#include "size.h"
 
-#define N_SIGNATURES	30
+#define N_SIGNATURES	SIZE
+
+#define COUNT (1 + (10000 / SIZE))
 
 typedef struct {
     secp256k1_context *ctx;
@@ -27,7 +30,7 @@ typedef struct {
 void bench_aggsig(void* arg) {
     size_t i;
     bench_aggsig_t *data = (bench_aggsig_t*) arg;
-    for (i = 0; i < 2000; i++) {
+    for (i = 0; i < COUNT; i++) {
         CHECK(secp256k1_aggsig_verify(data->ctx, data->scratch, data->sig, data->msg, data->pubkeys, N_SIGNATURES));
     }
 }
@@ -53,12 +56,15 @@ int main(void) {
 
     for (i = 0; i < N_SIGNATURES; i++) {
         memcpy(&data.seckeys[i], seed, 32);
-        data.seckeys[i][0] += i;
+        data.seckeys[i][0] = i;
+        data.seckeys[i][1] = i * 3;
+        data.seckeys[i][2] = i * 5;
+        data.seckeys[i][3] = i * 7;
         CHECK(secp256k1_ec_pubkey_create(data.ctx, &data.pubkeys[i], data.seckeys[i]));
     }
     data.aggctx = secp256k1_aggsig_context_create(data.ctx, data.pubkeys, N_SIGNATURES, seed);
 
-    run_benchmark("aggsig_32", bench_aggsig, bench_aggsig_setup, NULL, &data, 1, 2000);
+    run_benchmark("aggsig", bench_aggsig, bench_aggsig_setup, NULL, &data, 1, COUNT);
 
     secp256k1_aggsig_context_destroy(data.aggctx);
     secp256k1_scratch_space_destroy(data.scratch);

@@ -13,6 +13,7 @@
 #include "group.h"
 #include "scalar.h"
 #include "ecmult.h"
+#include "size.h"
 
 #if defined(EXHAUSTIVE_TEST_ORDER)
 /* We need to lower these values for exhaustive tests because
@@ -300,11 +301,7 @@ struct secp256k1_ecmult_point_state {
     size_t input_pos;
 };
 
-#ifdef USE_ENDOMORPHISM
-#define STRAUSS_WNAF_MAX_POINTS 24
-#else
-#define STRAUSS_WNAF_MAX_POINTS 32
-#endif
+#define STRAUSS_WNAF_MAX_POINTS SIZE
 
 static void secp256k1_ecmult_strauss_wnaf(const secp256k1_ecmult_context *ctx, secp256k1_gej *r, int num, const secp256k1_gej *a, const secp256k1_scalar *na, const secp256k1_scalar *ng) {
     secp256k1_ge pre_a[STRAUSS_WNAF_MAX_POINTS][ECMULT_TABLE_SIZE(WINDOW_A)];
@@ -698,6 +695,8 @@ static int secp256k1_ecmult_multi_split_bos_coster(const secp256k1_ecmult_contex
     size_t idx = 0;
     size_t point_idx = 0;
 
+    CHECK(n_batches == 1);
+
     /* Attempt to allocate sufficient space for Bos-Coster */
     while (!secp256k1_scratch_resize(scratch, error_callback, entries_per_batch * entry_size)) {
         entries_per_batch /= 2;
@@ -770,6 +769,7 @@ static int secp256k1_ecmult_multi_split_strauss_wnaf(const secp256k1_ecmult_cont
         if (out_pos == STRAUSS_WNAF_MAX_POINTS || in_pos == n) {
             secp256k1_ecmult_strauss_wnaf(ctx, first ? r : &acc, out_pos, points, scalars, first ? inp_g_sc : NULL);
             if (!first) {
+                CHECK(0);
                 secp256k1_gej_add_var(r, r, &acc, NULL);
             }
             first = 0;
@@ -863,6 +863,7 @@ static int secp256k1_ecmult_multi_split_pippenger(const secp256k1_ecmult_context
     size_t idx = 0;
     size_t point_idx = 0;
 
+    CHECK(n_batches == 1);
     /* Attempt to allocate sufficient space for Bos-Coster */
     while (!secp256k1_scratch_resize(scratch, error_callback, entries_per_batch * entry_size)) {
         entries_per_batch /= 2;
@@ -913,14 +914,19 @@ static int secp256k1_ecmult_multi_split_pippenger(const secp256k1_ecmult_context
 }
 
 static int secp256k1_ecmult_multi(const secp256k1_ecmult_context *ctx, secp256k1_scratch *scratch, const secp256k1_callback* error_callback, secp256k1_gej *r, const secp256k1_scalar *inp_g_sc, secp256k1_ecmult_multi_callback cb, void *cbdata, size_t n) {
-    /*
-    if (n > 200) {
-        return secp256k1_ecmult_multi_split_bos_coster(ctx, scratch, error_callback, r, inp_g_sc, cb, cbdata, n);
-    } else {
-        return secp256k1_ecmult_multi_split_strauss_wnaf(ctx, scratch, error_callback, r, inp_g_sc, cb, cbdata, n);
-    }
-    */
-    return secp256k1_ecmult_multi_split_pippenger(ctx, scratch, error_callback, r, inp_g_sc, cb, cbdata, n);
+#ifdef BOS_COSTER
+    return secp256k1_ecmult_multi_split_bos_coster(ctx, scratch, error_callback, r, inp_g_sc, cb, cbdata, n);
+#else
+#ifdef STRAUSS
+    return secp256k1_ecmult_multi_split_strauss_wnaf(ctx, scratch, error_callback, r, inp_g_sc, cb, cbdata, n);
+#else
+#ifdef PIPPENGER
+    return secp256k1_ecmult_multi_split_pippenger(ctx, scratch, error_callback, r, inp_g_sc, cb, cbdata, n); 
+#else
+#error "No ecmult_multi implementation chosen"
+#endif
+#endif
+#endif
 }
 
 #endif
