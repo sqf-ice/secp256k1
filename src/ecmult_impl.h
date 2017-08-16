@@ -793,7 +793,11 @@ static int secp256k1_ecmult_multi_pippenger(struct secp256k1_ecmult_point_state_
     secp256k1_gej buckets_pos[1<<MAXBUCKETBITS];
     int n;
     int num_groups;
-    int bucketbits = 8;
+#ifdef USE_ENDOMORPHISM
+    int bucketbits = num < 3 ? 1 : (num < 8 ? 2 : (num < 21 ? 3 : (num < 55 ? 4 : (num < 133 ? 5 : (num < 310 ? 6 : (num < 606 ? 7 : (num < 2301 ? 8 : (num < 2803 ? 9 : (num < 9208 ? 10 : (num < 16976 ? 11 : 12))))))))));
+#else
+    int bucketbits = num < 5 ? 1 : (num < 16 ? 2 : (num < 42 ? 3 : (num < 110 ? 4 : (num < 254 ? 5 : (num < 619 ? 6 : (num < 1354 ? 7 : (num < 3741 ? 8 : (num < 7030 ? 9 : (num < 18590 ? 10 : (num < 36600 ? 11 : 12))))))))));
+#endif
     int nreadbits;
     for (np = 0; np < num; ++np) {
         if (secp256k1_scalar_is_zero(&sc[np]) || secp256k1_ge_is_infinity(&pt[np])) {
