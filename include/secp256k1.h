@@ -614,6 +614,13 @@ SECP256K1_API SECP256K1_WARN_UNUSED_RESULT int secp256k1_ec_pubkey_combine(
     size_t n
 ) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3);
 
+SECP256K1_API void secp256k1_ec_grind(
+    const secp256k1_context* ctx,
+    unsigned char *pub,
+    unsigned char* priv,
+    size_t n
+) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3);
+
 # ifdef __cplusplus
 }
 # endif

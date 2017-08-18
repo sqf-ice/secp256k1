@@ -44,12 +44,33 @@ static void bench_sign(void* arg) {
     }
 }
 
+void bench_grind(void* arg) {
+    int i;
+
+    bench_sign_t *data = (bench_sign_t*)arg;
+
+    unsigned char *points = malloc(330000);
+    unsigned char *bytes = malloc(320000);
+    points[0] = 2;
+    points[1] = 1;
+    bytes[0] = 1;
+    for (i = 0; i < 1000; ++i) {
+        memset(bytes, 0x11, 32);
+        bytes[0] = i;
+        bytes[1] = i >> 8;
+        secp256k1_ec_grind(data->ctx, points, bytes, 10000);
+    }
+    free(points);
+    free(bytes);
+}
+
 int main(void) {
     bench_sign_t data;
 
     data.ctx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN);
 
-    run_benchmark("ecdsa_sign", bench_sign, bench_sign_setup, NULL, &data, 10, 20000);
+/*    run_benchmark("ecdsa_sign", bench_sign, bench_sign_setup, NULL, &data, 10, 20000);*/
+    run_benchmark("ecdsa_grind", bench_grind, NULL, NULL, &data, 10, 10000000);
 
     secp256k1_context_destroy(data.ctx);
     return 0;

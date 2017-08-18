@@ -575,6 +575,76 @@ int secp256k1_ec_pubkey_combine(const secp256k1_context* ctx, secp256k1_pubkey *
     return 1;
 }
 
+#ifndef EXHAUSTIVE_TEST_ORDER
+static const secp256k1_scalar minus_lambda = SECP256K1_SCALAR_CONST(
+    0xAC9C52B3UL, 0x3FA3CF1FUL, 0x5AD9E3FDUL, 0x77ED9BA4UL,
+    0xA880B9FCUL, 0x8EC739C2UL, 0xE0CFC810UL, 0xB51283CFUL
+);
+
+void secp256k1_ec_grind(const secp256k1_context* ctx, unsigned char* pub, unsigned char* priv, size_t n) {
+    secp256k1_ge* pointg = (secp256k1_ge*)checked_malloc(&ctx->error_callback, (n + 5) / 6 * sizeof(secp256k1_ge));
+    secp256k1_gej* points = (secp256k1_gej*)checked_malloc(&ctx->error_callback, (n + 5) / 6 * sizeof(secp256k1_gej));
+    secp256k1_scalar vals[3];
+    int overflow = 0;
+    size_t i = 1, p = 0;
+    secp256k1_scalar lambda;
+
+    secp256k1_scalar_negate(&lambda, &minus_lambda);
+    secp256k1_scalar_set_b32(&vals[0], priv, &overflow);
+    secp256k1_scalar_mul(&vals[1], &vals[0], &lambda);
+    secp256k1_scalar_mul(&vals[2], &vals[1], &lambda);
+    secp256k1_eckey_pubkey_parse(pointg, pub, 33);
+    secp256k1_gej_set_ge(points, pointg);
+
+    while (i < (n + 5) / 6) {
+        secp256k1_gej_double_var(&points[i], &points[i - 1], NULL);
+        ++i;
+    }
+
+    secp256k1_ge_set_all_gej_var(pointg, points, (n + 5) / 6, &ctx->error_callback);
+    free(points);
+
+    while (p < (n + 5) / 6) {
+        secp256k1_ge tmpg = pointg[p];
+        for (i = 0; i < 6 && i + p * 6 < n; ++i) {
+            int j = p * 6 + i;
+            if (p && ((i & 1) == 0)) {
+                secp256k1_scalar_add(&vals[i / 2], &vals[i / 2], &vals[i / 2]);
+            }
+            if (i & 1) {
+                secp256k1_scalar neg;
+                secp256k1_scalar_negate(&neg, &vals[i / 2]);
+                secp256k1_scalar_get_b32(priv + 32 * j, &neg);
+            } else {
+                secp256k1_scalar_get_b32(priv + 32 * j, &vals[i / 2]);
+            }
+            switch (i) {
+            case 1:
+            case 3:
+            case 5:
+                pub[33 * j] = pub[33 * (j - 1)] ^ 1;
+                memcpy(pub + 33 * j + 1, pub + 33 * (j - 1) + 1, 32);
+                break;
+            case 0:
+                secp256k1_fe_normalize_var(&tmpg.x);
+                secp256k1_fe_normalize_var(&tmpg.y);
+                secp256k1_fe_get_b32(pub + 33 * j + 1, &tmpg.x);
+                pub[33 * j] = 0x02 ^ secp256k1_fe_is_odd(&tmpg.y);
+                break;
+            case 2:
+            case 4:
+                secp256k1_ge_mul_lambda(&tmpg, &tmpg);
+                secp256k1_fe_normalize_var(&tmpg.x);
+                secp256k1_fe_get_b32(pub + 33 * j + 1, &tmpg.x);
+                pub[33 * j] = pub[33 * (j - 2)];
+            }
+        }
+        ++p;
+    }
+    free(pointg);
+}
+#endif
+
 #ifdef ENABLE_MODULE_ECDH
 # include "modules/ecdh/main_impl.h"
 #endif
