@@ -15,7 +15,7 @@ fi
 ./configure \
     --enable-experimental="$EXPERIMENTAL" --enable-endomorphism="$ENDOMORPHISM" \
     --with-field="$FIELD" --with-bignum="$BIGNUM" --with-asm="$ASM" --with-scalar="$SCALAR" \
-    --enable-ecmult-static-precomputation="$STATICPRECOMPUTATION" --with-ecmult-gen-precision="$ECMULTGENPRECISION" \
+    --enable-ecmult-static-precomputation="$STATICPRECOMPUTATION" --with-ecmult-gen-blocks="$ECMULTGENBLOCKS" --with-ecmult-gen-teeth="$ECMULTGENTEETH" --with-ecmult-gen-gen="$ECMULTGENNEG" \
     --enable-module-ecdh="$ECDH" --enable-module-recovery="$RECOVERY" \
     --host="$HOST" $EXTRAFLAGS
 
